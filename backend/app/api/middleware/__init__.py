@@ -1,1 +1,3 @@
-# Custom middleware (JWT validation, rate limiting, etc.)
+from app.api.middleware.rate_limit import RateLimiter
+
+__all__ = ["RateLimiter"]
