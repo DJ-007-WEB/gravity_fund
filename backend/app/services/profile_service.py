@@ -22,6 +22,7 @@ async def upsert_profile(
     profile.risk_tolerance_answers = profile_in.risk_tolerance_answers.model_dump()
     profile.risk_score = assessment.risk_score
     profile.risk_category = assessment.risk_category
+    profile.suggested_equity_allocation_range = assessment.suggested_equity_allocation_range
 
     await db.commit()
     await db.refresh(profile)

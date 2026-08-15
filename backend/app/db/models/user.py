@@ -13,6 +13,7 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -49,6 +50,7 @@ class UserProfile(Base):
     risk_tolerance_answers: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
     risk_score: Mapped[float] = mapped_column(nullable=False)
     risk_category: Mapped[str] = mapped_column(String(50), nullable=False)
+    suggested_equity_allocation_range: Mapped[str] = mapped_column(String(50), nullable=False, default="0-0%")
 
     # Inverse side of the One-to-One relationship.
     user: Mapped["User"] = relationship("User", back_populates="profile")

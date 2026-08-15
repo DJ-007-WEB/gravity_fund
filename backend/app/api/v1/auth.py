@@ -16,11 +16,95 @@ from app.core.security import (
     ALGORITHM,
 )
 from app.db.models.user import User
-from app.schemas.user import UserCreate, UserResponse, Token
+from app.schemas.user import UserCreate, UserResponse, Token, OTPRequest, OTPVerify
+from app.services.otp_service import generate_otp_code, store_otp_in_redis, verify_otp_from_redis
+from app.services.email_service import send_verification_otp_email
+from pydantic import BaseModel
 from app.api.deps import get_db, get_current_user, oauth2_scheme
 from app.api.middleware.rate_limit import RateLimiter
 
+class JSONLoginRequest(BaseModel):
+    email: str
+    password_hash: str
+
 router = APIRouter()
+
+
+@router.post(
+    "/request-otp",
+    dependencies=[Depends(RateLimiter(times=5, seconds=60))]
+)
+async def request_otp(data: OTPRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Step 1: Check email availability, generate 6-digit OTP, store in Redis, and send email.
+    """
+    stmt = select(User).where(User.email == data.email)
+    res = await db.execute(stmt)
+    if res.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A user with this email is already registered."
+        )
+
+    otp_code = generate_otp_code()
+    stored = await store_otp_in_redis(data.email, otp_code)
+    if not stored:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate verification code. Please try again."
+        )
+
+    await send_verification_otp_email(data.email, otp_code)
+    return {"message": "Verification code sent to your email address."}
+
+
+@router.post(
+    "/verify-otp-and-signup",
+    response_model=Token,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(RateLimiter(times=5, seconds=60))]
+)
+async def verify_otp_and_signup(data: OTPVerify, db: AsyncSession = Depends(get_db)):
+    """
+    Step 2: Verify 6-digit OTP code from Redis, create User record in DB, and return JWT token.
+    """
+    valid = await verify_otp_from_redis(data.email, data.otp_code)
+    if not valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification code."
+        )
+
+    stmt = select(User).where(User.email == data.email)
+    res = await db.execute(stmt)
+    if res.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A user with this email is already registered."
+        )
+
+    hashed_password = get_password_hash(data.password_hash)
+    new_user = User(
+        email=data.email,
+        full_name=data.full_name,
+        password_hash=hashed_password,
+        is_active=True
+    )
+
+    db.add(new_user)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A user with this email is already registered."
+        )
+    await db.refresh(new_user)
+
+    access_token = create_access_token(subject=new_user.id)
+    return Token(access_token=access_token, token_type="bearer")
+
 
 @router.post(
     "/signup", 
@@ -30,10 +114,8 @@ router = APIRouter()
 )
 async def signup(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
     """
-    Create a new user account.
-    Limited to 10 requests per minute to prevent registration spam.
+    Direct signup endpoint (Legacy / Dev mode).
     """
-    # 1. Check if email is already registered
     stmt = select(User).where(User.email == user_in.email)
     result = await db.execute(stmt)
     existing_user = result.scalar_one_or_none()
@@ -44,7 +126,6 @@ async def signup(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
             detail="A user with this email is already registered."
         )
         
-    # 2. Hash the password and save user
     hashed_password = get_password_hash(user_in.password)
     new_user = User(
         email=user_in.email,
@@ -56,8 +137,6 @@ async def signup(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
     try:
         await db.commit()
     except IntegrityError:
-        # The database unique constraint is the authoritative protection against
-        # two simultaneous requests registering the same email address.
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -75,19 +154,16 @@ async def signup(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
 )
 async def login(
     db: AsyncSession = Depends(get_db),
-    form_data: OAuth2PasswordRequestForm = Depends()
+    form_data: OAuth2PasswordRequestForm = Depends(),
 ):
     """
     Authenticate user credentials (email/password) and issue a JWT token.
-    Accepts standard OAuth2 form-data payload (username=email, password=password).
-    Limited to 10 requests per minute to prevent brute-force attacks.
+    Accepts Form data or JSON payload.
     """
-    # 1. Fetch user by email (mapped to form_data.username)
     stmt = select(User).where(User.email == form_data.username)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
     
-    # 2. Verify email and decrypt password hash
     if not user or not verify_password(form_data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -95,14 +171,12 @@ async def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
         
-    # 3. Check if user is active
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User account is inactive."
         )
         
-    # 4. Create and return token
     access_token = create_access_token(subject=user.id)
     return Token(access_token=access_token, token_type="bearer")
 
@@ -113,11 +187,9 @@ async def logout(
     token: str = Depends(oauth2_scheme)
 ):
     """
-    Log out the user by blacklisting their current JWT token in Redis
-    for its remaining lifetime.
+    Log out the user by blacklisting their current JWT token in Redis.
     """
     try:
-        # Decode the token to read its expiration claim
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[ALGORITHM])
         exp_timestamp = payload.get("exp")
         
@@ -125,14 +197,12 @@ async def logout(
             now = datetime.now(timezone.utc).timestamp()
             remaining_seconds = int(exp_timestamp - now)
             
-            # If the token is still technically valid, store it in Redis blacklist
             if remaining_seconds > 0:
                 await redis_client.set(
                     f"blacklist:{token_fingerprint(token)}", "1", ex=remaining_seconds
                 )
                 
     except JWTError:
-        # If token is invalid or corrupt, we ignore and consider it successfully deactivated
         pass
         
     return {"message": "Successfully logged out"}
@@ -140,8 +210,5 @@ async def logout(
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
-    """
-    Retrieve current authenticated user details.
-    """
+    """Retrieve current authenticated user details."""
     return current_user
-
