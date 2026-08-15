@@ -2,12 +2,19 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from jose import jwt, JWTError
 
 from app.core.config import settings
 from app.core.redis import redis_client
-from app.core.security import get_password_hash, verify_password, create_access_token, ALGORITHM
+from app.core.security import (
+    get_password_hash,
+    verify_password,
+    create_access_token,
+    token_fingerprint,
+    ALGORITHM,
+)
 from app.db.models.user import User
 from app.schemas.user import UserCreate, UserResponse, Token
 from app.api.deps import get_db, get_current_user, oauth2_scheme
@@ -46,7 +53,16 @@ async def signup(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
     )
     
     db.add(new_user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # The database unique constraint is the authoritative protection against
+        # two simultaneous requests registering the same email address.
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A user with this email is already registered.",
+        )
     await db.refresh(new_user)
     
     return new_user
@@ -111,7 +127,9 @@ async def logout(
             
             # If the token is still technically valid, store it in Redis blacklist
             if remaining_seconds > 0:
-                await redis_client.set(f"blacklist:{token}", "1", ex=remaining_seconds)
+                await redis_client.set(
+                    f"blacklist:{token_fingerprint(token)}", "1", ex=remaining_seconds
+                )
                 
     except JWTError:
         # If token is invalid or corrupt, we ignore and consider it successfully deactivated

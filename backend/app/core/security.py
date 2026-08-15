@@ -1,4 +1,5 @@
 import bcrypt
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Any, Union
 from jose import jwt
@@ -45,3 +46,8 @@ def create_access_token(subject: Union[str, Any], expires_delta: Union[timedelta
     # Cryptographically sign and encode the token using our secret key
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+
+def token_fingerprint(token: str) -> str:
+    """Return a non-reversible identifier suitable for Redis keys."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()

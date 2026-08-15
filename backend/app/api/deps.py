@@ -36,7 +36,9 @@ async def get_current_user(
     )
     
     # 1. Check if the token has been blacklisted (invalidated via logout)
-    is_blacklisted = await redis_client.get(f"blacklist:{token}")
+    from app.core.security import token_fingerprint
+
+    is_blacklisted = await redis_client.get(f"blacklist:{token_fingerprint(token)}")
     if is_blacklisted:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
