@@ -19,13 +19,8 @@ from app.db.models.user import User
 from app.schemas.user import UserCreate, UserResponse, Token, OTPRequest, OTPVerify
 from app.services.otp_service import generate_otp_code, store_otp_in_redis, verify_otp_from_redis
 from app.services.email_service import send_verification_otp_email
-from pydantic import BaseModel
 from app.api.deps import get_db, get_current_user, oauth2_scheme
 from app.api.middleware.rate_limit import RateLimiter
-
-class JSONLoginRequest(BaseModel):
-    email: str
-    password_hash: str
 
 router = APIRouter()
 
@@ -157,8 +152,10 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
 ):
     """
-    Authenticate user credentials (email/password) and issue a JWT token.
-    Accepts Form data or JSON payload.
+    Authenticate user credentials using OAuth2 form data
+    and issue a JWT access token.
+
+    The OAuth2 username field contains the user's email.
     """
     stmt = select(User).where(User.email == form_data.username)
     result = await db.execute(stmt)
