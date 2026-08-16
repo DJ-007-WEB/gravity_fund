@@ -15,7 +15,7 @@ from app.core.security import (
     ALGORITHM,
 )
 from app.db.models.user import User
-from app.schemas.user import Token, OTPRequest, OTPVerify
+from app.schemas.user import UserResponse, Token, OTPRequest, OTPVerify
 from app.services.otp_service import generate_otp_code, store_otp_in_redis, verify_otp_from_redis
 from app.services.email_service import send_verification_otp_email
 from app.services.auth_service import authenticate_user
@@ -166,7 +166,7 @@ async def logout(
     return {"message": "Successfully logged out"}
 
 
-@router.get("/me", response_model=Token)
+@router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
     """Retrieve current authenticated user details."""
     return current_user
