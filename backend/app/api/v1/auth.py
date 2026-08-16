@@ -15,7 +15,7 @@ from app.core.security import (
     ALGORITHM,
 )
 from app.db.models.user import User
-from app.schemas.user import UserCreate, UserResponse, Token, OTPRequest, OTPVerify
+from app.schemas.user import Token, OTPRequest, OTPVerify
 from app.services.otp_service import generate_otp_code, store_otp_in_redis, verify_otp_from_redis
 from app.services.email_service import send_verification_otp_email
 from app.services.auth_service import authenticate_user
@@ -102,48 +102,7 @@ async def verify_otp_and_signup(data: OTPVerify, db: AsyncSession = Depends(get_
 
 
 @router.post(
-    "/signup", 
-    response_model=UserResponse, 
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(RateLimiter(times=10, seconds=60))]
-)
-async def signup(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
-    """
-    Direct signup endpoint (Legacy / Dev mode).
-    """
-    stmt = select(User).where(User.email == user_in.email)
-    result = await db.execute(stmt)
-    existing_user = result.scalar_one_or_none()
-    
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A user with this email is already registered."
-        )
-        
-    hashed_password = get_password_hash(user_in.password)
-    new_user = User(
-        email=user_in.email,
-        password_hash=hashed_password,
-        is_active=True
-    )
-    
-    db.add(new_user)
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A user with this email is already registered.",
-        )
-    await db.refresh(new_user)
-    
-    return new_user
-
-
-@router.post(
-    "/login", 
+    "/login",
     response_model=Token,
     dependencies=[Depends(RateLimiter(times=10, seconds=60))]
 )
@@ -169,13 +128,13 @@ async def login(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-        
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User account is inactive."
         )
-        
+
     access_token = create_access_token(subject=user.id)
     return Token(access_token=access_token, token_type="bearer")
 
@@ -191,23 +150,23 @@ async def logout(
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[ALGORITHM])
         exp_timestamp = payload.get("exp")
-        
+
         if exp_timestamp:
             now = datetime.now(timezone.utc).timestamp()
             remaining_seconds = int(exp_timestamp - now)
-            
+
             if remaining_seconds > 0:
                 await redis_client.set(
                     f"blacklist:{token_fingerprint(token)}", "1", ex=remaining_seconds
                 )
-                
+
     except JWTError:
         pass
-        
+
     return {"message": "Successfully logged out"}
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me", response_model=Token)
 async def get_me(current_user: User = Depends(get_current_user)):
     """Retrieve current authenticated user details."""
     return current_user
