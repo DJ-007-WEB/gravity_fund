@@ -29,11 +29,11 @@ class TokenData(BaseModel):
 class OTPRequest(BaseModel):
     email: EmailStr
     full_name: str = Field(..., min_length=2, max_length=100, description="Full name of the registering user")
-    password_hash: str = Field(..., min_length=6, description="Password to be registered")
+    password: str = Field(..., min_length=8, description="Password to be registered")
 
 class OTPVerify(BaseModel):
     email: EmailStr
     full_name: str = Field(..., min_length=2, max_length=100)
-    password_hash: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=8)
     otp_code: str = Field(..., min_length=6, max_length=6, description="6-digit verification OTP code")
 
