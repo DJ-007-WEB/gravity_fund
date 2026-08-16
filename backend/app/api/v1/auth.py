@@ -78,7 +78,7 @@ async def verify_otp_and_signup(data: OTPVerify, db: AsyncSession = Depends(get_
             detail="A user with this email is already registered."
         )
 
-    hashed_password = get_password_hash(data.password_hash)
+    hashed_password = get_password_hash(data.password)
     new_user = User(
         email=data.email,
         full_name=data.full_name,
