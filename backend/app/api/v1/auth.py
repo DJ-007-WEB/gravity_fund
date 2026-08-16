@@ -10,7 +10,6 @@ from app.core.config import settings
 from app.core.redis import redis_client
 from app.core.security import (
     get_password_hash,
-    verify_password,
     create_access_token,
     token_fingerprint,
     ALGORITHM,
@@ -19,6 +18,7 @@ from app.db.models.user import User
 from app.schemas.user import UserCreate, UserResponse, Token, OTPRequest, OTPVerify
 from app.services.otp_service import generate_otp_code, store_otp_in_redis, verify_otp_from_redis
 from app.services.email_service import send_verification_otp_email
+from app.services.auth_service import authenticate_user
 from app.api.deps import get_db, get_current_user, oauth2_scheme
 from app.api.middleware.rate_limit import RateLimiter
 
@@ -157,11 +157,13 @@ async def login(
 
     The OAuth2 username field contains the user's email.
     """
-    stmt = select(User).where(User.email == form_data.username)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
-    
-    if not user or not verify_password(form_data.password, user.password_hash):
+    user = await authenticate_user(
+        db,
+        email=form_data.username,
+        password=form_data.password,
+    )
+
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
