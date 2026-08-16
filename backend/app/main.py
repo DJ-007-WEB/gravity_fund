@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.redis import redis_client
-from app.api.v1 import api_router
+from app.api.v1.router import api_router
 from app.api.middleware.request_id import RequestIdMiddleware
 from app.db.session import engine
 
