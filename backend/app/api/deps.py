@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.redis import redis_client
+from app.core.security import ALGORITHM, token_fingerprint
 from app.db.session import SessionLocal
 from app.db.models.user import User
 
@@ -36,8 +37,6 @@ async def get_current_user(
     )
     
     # 1. Check if the token has been blacklisted (invalidated via logout)
-    from app.core.security import token_fingerprint
-
     is_blacklisted = await redis_client.get(f"blacklist:{token_fingerprint(token)}")
     if is_blacklisted:
         raise HTTPException(
@@ -48,7 +47,6 @@ async def get_current_user(
         
     try:
         # 2. Decode the JWT token and extract user claims
-        from app.core.security import ALGORITHM
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[ALGORITHM])
         user_id_str: str = payload.get("sub")
         if user_id_str is None:
