@@ -6,7 +6,8 @@ from app.core.config import settings
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,           # Set to True if you want to see all raw SQL queries printed in console
-    future=True           # Ensures we use SQLAlchemy 2.0 style APIs
+    future=True,   
+    pool_pre_ping = True        # Ensures we use SQLAlchemy 2.0 style APIs
 )
 
 # async_sessionmaker is a factory for creating AsyncSession objects.

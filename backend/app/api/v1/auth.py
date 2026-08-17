@@ -9,7 +9,6 @@ from jose import jwt, JWTError
 from app.core.config import settings
 from app.core.redis import redis_client
 from app.core.security import (
-    get_password_hash,
     create_access_token,
     token_fingerprint,
     ALGORITHM,
@@ -18,7 +17,7 @@ from app.db.models.user import User
 from app.schemas.user import UserResponse, Token, OTPRequest, OTPVerify
 from app.services.otp_service import generate_otp_code, store_otp_in_redis, verify_otp_from_redis
 from app.services.email_service import send_verification_otp_email
-from app.services.auth_service import authenticate_user
+from app.services.auth_service import authenticate_user, create_user
 from app.api.deps import get_db, get_current_user, oauth2_scheme
 from app.api.middleware.rate_limit import RateLimiter
 
@@ -69,33 +68,23 @@ async def verify_otp_and_signup(data: OTPVerify, db: AsyncSession = Depends(get_
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification code."
         )
-
-    stmt = select(User).where(User.email == data.email)
-    res = await db.execute(stmt)
-    if res.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A user with this email is already registered."
-        )
-
-    hashed_password = get_password_hash(data.password)
-    new_user = User(
+    try:
+     new_user = await create_user(
+        db,
         email=data.email,
         full_name=data.full_name,
-        password_hash=hashed_password,
-        is_active=True
+        password=data.password,
     )
-
-    db.add(new_user)
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
+    except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A user with this email is already registered."
-        )
-    await db.refresh(new_user)
+        status_code=status.HTTP_409_CONFLICT,
+        detail=str(exc),
+    )
+    except IntegrityError:
+        raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="A user with this email is already registered.",
+    )
 
     access_token = create_access_token(subject=new_user.id)
     return Token(access_token=access_token, token_type="bearer")
