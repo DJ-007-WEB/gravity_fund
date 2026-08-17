@@ -10,18 +10,13 @@ from app.core.config import settings
 from app.core.redis import redis_client
 from app.core.security import (
     create_access_token,
-    token_fingerprint,
     ALGORITHM,
 )
 from app.db.models.user import User
 from app.schemas.user import UserResponse, Token, OTPRequest, OTPVerify
-from app.services.otp_service import (
-    OTPServiceUnavailable,
-    generate_otp_code,
-    store_otp_in_redis,
-    verify_otp_from_redis,
-)
+from app.services.otp_service import generate_otp_code, store_otp_in_redis, verify_otp_from_redis
 from app.services.email_service import send_verification_otp_email
+from app.services.otp_service import OTPServiceUnavailable
 from app.services.auth_service import authenticate_user, create_user
 from app.api.deps import get_db, get_current_user, oauth2_scheme
 from app.api.middleware.rate_limit import RateLimiter
@@ -159,14 +154,15 @@ async def logout(
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[ALGORITHM])
         exp_timestamp = payload.get("exp")
+        jti = payload.get("jti")
 
-        if exp_timestamp:
+        if exp_timestamp and jti:
             now = datetime.now(timezone.utc).timestamp()
             remaining_seconds = int(exp_timestamp - now)
 
             if remaining_seconds > 0:
                 await redis_client.set(
-                    f"blacklist:{token_fingerprint(token)}", "1", ex=remaining_seconds
+                    f"blacklist:{jti}", "1", ex=remaining_seconds
                 )
 
     except JWTError:
