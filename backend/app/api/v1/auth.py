@@ -15,7 +15,12 @@ from app.core.security import (
 )
 from app.db.models.user import User
 from app.schemas.user import UserResponse, Token, OTPRequest, OTPVerify
-from app.services.otp_service import generate_otp_code, store_otp_in_redis, verify_otp_from_redis
+from app.services.otp_service import (
+    OTPServiceUnavailable,
+    generate_otp_code,
+    store_otp_in_redis,
+    verify_otp_from_redis,
+)
 from app.services.email_service import send_verification_otp_email
 from app.services.auth_service import authenticate_user, create_user
 from app.api.deps import get_db, get_current_user, oauth2_scheme
@@ -41,7 +46,14 @@ async def request_otp(data: OTPRequest, db: AsyncSession = Depends(get_db)):
         )
 
     otp_code = generate_otp_code()
-    stored = await store_otp_in_redis(data.email, otp_code)
+    try:
+        stored = await store_otp_in_redis(data.email, otp_code)
+    except OTPServiceUnavailable:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Verification service is temporarily unavailable. Please try again later."
+        )
+
     if not stored:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -62,29 +74,37 @@ async def verify_otp_and_signup(data: OTPVerify, db: AsyncSession = Depends(get_
     """
     Step 2: Verify 6-digit OTP code from Redis, create User record in DB, and return JWT token.
     """
-    valid = await verify_otp_from_redis(data.email, data.otp_code)
+    try:
+        valid = await verify_otp_from_redis(data.email, data.otp_code)
+    except OTPServiceUnavailable:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Verification service is temporarily unavailable. Please try again later."
+        )
+
     if not valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification code."
         )
+
     try:
-     new_user = await create_user(
-        db,
-        email=data.email,
-        full_name=data.full_name,
-        password=data.password,
-    )
+        new_user = await create_user(
+            db,
+            email=data.email,
+            full_name=data.full_name,
+            password=data.password,
+        )
     except ValueError as exc:
         raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail=str(exc),
-    )
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
     except IntegrityError:
         raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail="A user with this email is already registered.",
-    )
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A user with this email is already registered.",
+        )
 
     access_token = create_access_token(subject=new_user.id)
     return Token(access_token=access_token, token_type="bearer")
