@@ -19,14 +19,17 @@ from app.services.email_service import send_verification_otp_email
 from app.services.otp_service import OTPServiceUnavailable
 from app.services.auth_service import authenticate_user, create_user
 from app.api.deps import get_db, get_current_user, oauth2_scheme
-from app.api.middleware.rate_limit import RateLimiter
+from app.api.middleware.rate_limit import RateLimiter, AccountRateLimiter
 
 router = APIRouter()
 
 
 @router.post(
     "/request-otp",
-    dependencies=[Depends(RateLimiter(times=5, seconds=60))]
+    dependencies=[
+        Depends(RateLimiter(times=5, seconds=60)),
+        Depends(AccountRateLimiter(times=5, seconds=15 * 60, field_name="email", source="json")),
+    ]
 )
 async def request_otp(data: OTPRequest, db: AsyncSession = Depends(get_db)):
     """
@@ -108,7 +111,10 @@ async def verify_otp_and_signup(data: OTPVerify, db: AsyncSession = Depends(get_
 @router.post(
     "/login",
     response_model=Token,
-    dependencies=[Depends(RateLimiter(times=10, seconds=60))]
+    dependencies=[
+        Depends(RateLimiter(times=10, seconds=60)),
+        Depends(AccountRateLimiter(times=10, seconds=15 * 60, field_name="username", source="form")),
+    ]
 )
 async def login(
     db: AsyncSession = Depends(get_db),
