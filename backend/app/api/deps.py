@@ -1,12 +1,12 @@
 from typing import AsyncGenerator
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.redis import redis_client
-from app.core.security import ALGORITHM
+from app.core.security import decode_access_token
 from app.db.session import SessionLocal
 from app.db.models.user import User
 
@@ -39,16 +39,10 @@ async def get_current_user(
     )
 
     try:
-        # Decode first so the signature and standard claims such as exp are validated.
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[ALGORITHM])
-
-        user_id_str = payload.get("sub")
-        jti = payload.get("jti")
-        if user_id_str is None or jti is None:
-            raise credentials_exception
-
-        user_id = int(user_id_str)
-    except (JWTError, ValueError, TypeError):
+        payload = decode_access_token(token)
+        user_id = int(payload["sub"])
+        jti = payload["jti"]
+    except (JWTError, ValueError, TypeError, KeyError):
         raise credentials_exception
 
     # Check whether this specific token has been revoked via logout.
