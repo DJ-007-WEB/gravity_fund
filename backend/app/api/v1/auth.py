@@ -34,14 +34,14 @@ router = APIRouter()
 async def request_otp(data: OTPRequest, db: AsyncSession = Depends(get_db)):
     """
     Step 1: Check email availability, generate 6-digit OTP, store in Redis, and send email.
+
+    The response is intentionally generic so callers cannot determine whether
+    an email address is already registered.
     """
     stmt = select(User).where(User.email == data.email)
     res = await db.execute(stmt)
     if res.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A user with this email is already registered."
-        )
+        return {"message": "If this email is eligible, a verification code has been sent."}
 
     otp_code = generate_otp_code()
     try:
@@ -59,7 +59,7 @@ async def request_otp(data: OTPRequest, db: AsyncSession = Depends(get_db)):
         )
 
     await send_verification_otp_email(data.email, otp_code)
-    return {"message": "Verification code sent to your email address."}
+    return {"message": "If this email is eligible, a verification code has been sent."}
 
 
 @router.post(
