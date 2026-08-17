@@ -3,7 +3,7 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Any, Union
 from uuid import uuid4
-from jose import jwt
+from jose import JWTError, jwt
 from app.core.config import settings
 
 # HS256 stands for HMAC using SHA-256 hash algorithm.
@@ -48,3 +48,27 @@ def create_access_token(subject: Union[str, Any], expires_delta: Union[timedelta
 
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+
+def decode_access_token(token: str) -> dict[str, Any]:
+    """
+    Decode and validate an access token's signature and required claims.
+
+    Raises JWTError when the token is invalid, expired, or missing required claims.
+    """
+    payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[ALGORITHM])
+
+    user_id = payload.get("sub")
+    jti = payload.get("jti")
+    issued_at = payload.get("iat")
+
+    if not isinstance(user_id, str) or not user_id.isdigit() or int(user_id) <= 0:
+        raise JWTError("Invalid subject claim")
+
+    if not isinstance(jti, str) or not jti.strip():
+        raise JWTError("Invalid token ID claim")
+
+    if issued_at is None:
+        raise JWTError("Missing issued-at claim")
+
+    return payload
