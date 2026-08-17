@@ -10,7 +10,7 @@ interface AuthContextType {
   profile: UserProfile | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (token: string, email: string) => void;
+  login: (token: string, email: string, fullName?: string) => void;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<UserProfile | null>;
 }
@@ -49,7 +49,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         .getProfile()
         .then((prof) => setProfile(prof))
         .catch(() => {
-          // Profile might not exist yet or token expired
+          // Profile might not exist yet or token expired.
         })
         .finally(() => setIsLoading(false));
     } else {
@@ -60,10 +60,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const login = (newToken: string, newEmail: string, newFullName?: string) => {
     localStorage.setItem("gravity_auth_token", newToken);
     localStorage.setItem("gravity_user_email", newEmail);
-    if (newFullName) localStorage.setItem("gravity_user_fullname", newFullName);
+
+    if (newFullName) {
+      localStorage.setItem("gravity_user_fullname", newFullName);
+    } else {
+      localStorage.removeItem("gravity_user_fullname");
+    }
+
     setToken(newToken);
     setEmail(newEmail);
-    if (newFullName) setFullName(newFullName);
+    setFullName(newFullName ?? null);
 
     api
       .getProfile()
@@ -77,7 +83,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         await api.logout();
       }
     } catch {
-      // Ignore network errors on logout
+      // Ignore network errors on logout.
     } finally {
       localStorage.removeItem("gravity_auth_token");
       localStorage.removeItem("gravity_user_email");
