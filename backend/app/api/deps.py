@@ -6,13 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.redis import redis_client
-from app.core.security import ALGORITHM, token_fingerprint
+from app.core.security import ALGORITHM
 from app.db.session import SessionLocal
 from app.db.models.user import User
 
 # Define the OAuth2 scheme. FastAPI will use this to document security requirements in Swagger
 # and read the Authorization header from client requests.
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
@@ -21,6 +22,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
     async with SessionLocal() as session:
         yield session
+
 
 async def get_current_user(
     db: AsyncSession = Depends(get_db),
@@ -35,36 +37,39 @@ async def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
-    # 1. Check if the token has been blacklisted (invalidated via logout)
-    is_blacklisted = await redis_client.get(f"blacklist:{token_fingerprint(token)}")
+
+    try:
+        # Decode first so the signature and standard claims such as exp are validated.
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[ALGORITHM])
+
+        user_id_str = payload.get("sub")
+        jti = payload.get("jti")
+        if user_id_str is None or jti is None:
+            raise credentials_exception
+
+        user_id = int(user_id_str)
+    except (JWTError, ValueError, TypeError):
+        raise credentials_exception
+
+    # Check whether this specific token has been revoked via logout.
+    is_blacklisted = await redis_client.get(f"blacklist:{jti}")
     if is_blacklisted:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session has expired or logged out. Please log in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-        
-    try:
-        # 2. Decode the JWT token and extract user claims
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[ALGORITHM])
-        user_id_str: str = payload.get("sub")
-        if user_id_str is None:
-            raise credentials_exception
-        user_id = int(user_id_str)
-    except (JWTError, ValueError):
-        raise credentials_exception
-        
-    # 3. Retrieve the user from the database
+
+    # Retrieve the user from the database.
     user = await db.get(User, user_id)
     if user is None:
         raise credentials_exception
-        
-    # 4. Check if the user's account is active
+
+    # Check if the user's account is active.
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User account is inactive"
         )
-        
+
     return user
