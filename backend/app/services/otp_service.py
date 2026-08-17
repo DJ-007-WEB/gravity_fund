@@ -8,6 +8,10 @@ logger = logging.getLogger(__name__)
 OTP_MAX_ATTEMPTS = 5
 
 
+class OTPServiceUnavailable(Exception):
+    """Raised when the OTP service cannot reach Redis."""
+
+
 def generate_otp_code() -> str:
     """Generate a cryptographically secure 6-digit numeric OTP code."""
     return f"{secrets.randbelow(1000000):06d}"
@@ -24,7 +28,7 @@ async def store_otp_in_redis(email: str, otp_code: str) -> bool:
         return True
     except Exception as e:
         logger.error(f"Failed to store OTP in Redis: {e}")
-        return False
+        raise OTPServiceUnavailable from e
 
 
 async def verify_otp_from_redis(email: str, otp_code: str) -> bool:
@@ -53,6 +57,8 @@ async def verify_otp_from_redis(email: str, otp_code: str) -> bool:
             await redis_client.delete(attempts_key)
 
         return False
+    except OTPServiceUnavailable:
+        raise
     except Exception as e:
         logger.error(f"Failed to verify OTP from Redis: {e}")
-        return False
+        raise OTPServiceUnavailable from e
